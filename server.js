@@ -1,5 +1,6 @@
 // server.js
-// Secure backend proxy for TMDB – hides your API key
+// Secure Movie Backend API
+// Supports: TMDB + OMDB + TRAKT
 
 const express = require("express");
 const cors = require("cors");
@@ -7,77 +8,88 @@ const fetch = require("node-fetch");
 require("dotenv").config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
-
-// Simple check: API key must exist
-if (!TMDB_API_KEY) {
-  console.error("❌ TMDB_API_KEY missing in .env file");
-  process.exit(1);
-}
-
 app.use(cors());
 
-// Helper to call TMDB
-async function proxyTmdb(res, tmdbPath) {
-  try {
-    const url = `${TMDB_BASE_URL}${tmdbPath}${
-      tmdbPath.includes("?") ? "&" : "?"
-    }api_key=${TMDB_API_KEY}&language=en-US`;
+const PORT = process.env.PORT || 3000;
 
-    const response = await fetch(url);
-    if (!response.ok) {
-      console.error("TMDB error:", response.status, response.statusText);
-      return res.status(response.status).json({
-        error: true,
-        status: response.status,
-        message: response.statusText,
-      });
-    }
+const TMDB_KEY = process.env.TMDB_API_KEY;
+const OMDB_KEY = process.env.OMDB_API_KEY;
+const TRAKT_ID = process.env.TRAKT_CLIENT_ID;
 
-    const data = await response.json();
-    return res.json(data);
-  } catch (err) {
-    console.error("Server error:", err);
-    return res.status(500).json({
-      error: true,
-      message: "Internal server error while calling TMDB",
-    });
-  }
+if (!TMDB_KEY) {
+    console.error("❌ Missing TMDB_API_KEY");
+    process.exit(1);
 }
 
-// ✅ Popular movies
-app.get("/api/movies/popular", (req, res) => {
-  const page = req.query.page || 1;
-  proxyTmdb(res, `/movie/popular?page=${page}`);
+async function fetchJSON(url, options = {}) {
+    const res = await fetch(url, options);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+}
+
+// TMDB basic fetch
+async function tmdb(path) {
+    const joiner = path.includes("?") ? "&" : "?";
+    const url = `https://api.themoviedb.org/3${path}${joiner}api_key=${TMDB_KEY}&language=en-US`;
+    return fetchJSON(url);
+}
+
+// TRAKT trending fetch
+async function traktTrending() {
+    return fetchJSON(`https://api.trakt.tv/movies/trending`, {
+        headers: {
+            "Content-Type": "application/json",
+            "trakt-api-version": 2,
+            "trakt-api-key": TRAKT_ID
+        }
+    });
+}
+
+// Popular
+app.get("/api/movies/popular", async (req, res) => {
+    try {
+        res.json(await tmdb(`/movie/popular?page=1`));
+    } catch {
+        res.status(500).json({ error: true });
+    }
 });
 
-// ✅ Trending movies (day)
-app.get("/api/movies/trending", (req, res) => {
-  const page = req.query.page || 1;
-  proxyTmdb(res, `/trending/movie/day?page=${page}`);
+// Now Playing
+app.get("/api/movies/now-playing", async (req, res) => {
+    try {
+        res.json(await tmdb(`/movie/now_playing?page=1`));
+    } catch {
+        res.status(500).json({ error: true });
+    }
 });
 
-// ✅ Now playing
-app.get("/api/movies/now-playing", (req, res) => {
-  const page = req.query.page || 1;
-  proxyTmdb(res, `/movie/now_playing?page=${page}`);
+// Upcoming
+app.get("/api/movies/upcoming", async (req, res) => {
+    try {
+        res.json(await tmdb(`/movie/upcoming?page=1`));
+    } catch {
+        res.status(500).json({ error: true });
+    }
 });
 
-// ✅ Upcoming
-app.get("/api/movies/upcoming", (req, res) => {
-  const page = req.query.page || 1;
-  proxyTmdb(res, `/movie/upcoming?page=${page}`);
+// ⭐ Trending → TRAKT powered
+app.get("/api/movies/trending", async (req, res) => {
+    try {
+        res.json(await traktTrending());
+    } catch {
+        res.status(500).json({ error: true });
+    }
 });
 
-// ✅ Movie details by ID
-app.get("/api/movies/:id", (req, res) => {
-  const movieId = req.params.id;
-  proxyTmdb(res, `/movie/${movieId}`);
+// Details
+app.get("/api/movies/:id", async (req, res) => {
+    try {
+        res.json(await tmdb(`/movie/${req.params.id}`));
+    } catch {
+        res.status(500).json({ error: true });
+    }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Backend server running on port ${PORT}`);
-});
+app.listen(PORT, () =>
+    console.log(`🔥 Backend running on port ${PORT}`)
+);
